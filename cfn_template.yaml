@@ -1,0 +1,107 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'Amazon OpenSearch Serverless template to create an IAM user, encryption policy, data access policy and collection'
+Parameters:
+  S3BucketName:
+    Description: S3 bucket to upload the PDF files
+    Type: String
+    AllowedPattern: "^(?=\\s*\\S).*$"
+Resources:
+  S3Bucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Ref S3BucketName
+  IAMuser:
+    Type: 'AWS::IAM::User'
+    Properties:
+      UserName:  aossadmin
+  DataAccessPolicy:
+    Type: 'AWS::OpenSearchServerless::AccessPolicy'
+    Properties:
+      Name: image-search-access-policy
+      Type: data
+      Description: Access policy for AOSS collection
+      Policy: !Sub >-
+        [{"Description":"Access for cfn user","Rules":[{"ResourceType":"index","Resource":["index/*/*"],"Permission":["aoss:*"]},
+        {"ResourceType":"collection","Resource":["collection/image-search"],"Permission":["aoss:*"]}],
+        "Principal":["arn:aws:iam::${AWS::AccountId}:user/aossadmin"]}]
+  NetworkPolicy:
+    Type: 'AWS::OpenSearchServerless::SecurityPolicy'
+    Properties:
+      Name: image-search-network-policy
+      Type: network
+      Description: Network policy for image-search collection
+      Policy: >-
+        [{"Rules":[{"ResourceType":"collection","Resource":["collection/image-search"]}, {"ResourceType":"dashboard","Resource":["collection/image-search"]}],"AllowFromPublic":true}]
+  EncryptionPolicy:
+    Type: 'AWS::OpenSearchServerless::SecurityPolicy'
+    Properties:
+      Name: image-search-security-policy
+      Type: encryption
+      Description: Encryption policy for image-search collection
+      Policy: >-
+        {"Rules":[{"ResourceType":"collection","Resource":["collection/image-search"]}],"AWSOwnedKey":true}
+  Collection:
+    Type: 'AWS::OpenSearchServerless::Collection'
+    DeletionPolicy: Delete
+    Properties:
+      Name: image-search-2
+      Type: VECTORSEARCH
+      Description: Collection to holds images and metadata about the images extracted from pdf documents
+    DependsOn: [EncryptionPolicy, DataAccessPolicy, NetworkPolicy]
+  SessionTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+  AdminRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                - !Sub arn:aws:iam::${AWS::AccountId}:root
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+  Cloud9Env:
+    Type: AWS::Cloud9::EnvironmentEC2
+    Properties:
+      AutomaticStopTimeMinutes: 150
+      Description: Enterprise Search Development Environment
+      ImageId: amazonlinux-2-x86_64
+      InstanceType: t3.large
+      Name: enterprise-search-env
+#      Repositories:
+#        - PathComponent: chatbot-workshop
+#          RepositoryUrl:
+#            Fn::GetAtt:
+#              - CodeCommitRepoDC6A41F9
+#              - CloneUrlHttp
+    Metadata:
+      aws:cdk:path: workshop/Cloud9
+
+Outputs:
+  IAMUser:
+    Value: !Ref IAMuser
+  DashboardURL:
+    Value: !GetAtt Collection.DashboardEndpoint
+  CollectionARN:
+    Value: !GetAtt Collection.Arn
+  SessionTableName:
+    Description: DynamoDB Chat History Table
+    Value: !Ref SessionTable
