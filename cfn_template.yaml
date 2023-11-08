@@ -1,56 +1,33 @@
 AWSTemplateFormatVersion: 2010-09-09
 Description: 'Amazon OpenSearch Serverless template to create an IAM user, encryption policy, data access policy and collection'
+
 Parameters:
   S3BucketName:
     Description: S3 bucket to upload the PDF files
     Type: String
+    Default: image-search-east-1
     AllowedPattern: "^(?=\\s*\\S).*$"
+
+  CidrIPRange:
+    Description: Please enter the Public CIDR of your local PC (e.g. 73.13.100.24/32)
+    Type: String
+    Default: 15.248.1.220/32
+    AllowedPattern: "^(?=\\s*\\S).*$"
+
+  LatestAmiId:
+      Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+      Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+
 Resources:
   S3Bucket:
     Type: 'AWS::S3::Bucket'
     Properties:
       BucketName: !Ref S3BucketName
-  IAMuser:
-    Type: 'AWS::IAM::User'
-    Properties:
-      UserName:  aossadmin
-  DataAccessPolicy:
-    Type: 'AWS::OpenSearchServerless::AccessPolicy'
-    Properties:
-      Name: image-search-access-policy
-      Type: data
-      Description: Access policy for AOSS collection
-      Policy: !Sub >-
-        [{"Description":"Access for cfn user","Rules":[{"ResourceType":"index","Resource":["index/*/*"],"Permission":["aoss:*"]},
-        {"ResourceType":"collection","Resource":["collection/image-search"],"Permission":["aoss:*"]}],
-        "Principal":["arn:aws:iam::${AWS::AccountId}:user/aossadmin"]}]
-  NetworkPolicy:
-    Type: 'AWS::OpenSearchServerless::SecurityPolicy'
-    Properties:
-      Name: image-search-network-policy
-      Type: network
-      Description: Network policy for image-search collection
-      Policy: >-
-        [{"Rules":[{"ResourceType":"collection","Resource":["collection/image-search"]}, {"ResourceType":"dashboard","Resource":["collection/image-search"]}],"AllowFromPublic":true}]
-  EncryptionPolicy:
-    Type: 'AWS::OpenSearchServerless::SecurityPolicy'
-    Properties:
-      Name: image-search-security-policy
-      Type: encryption
-      Description: Encryption policy for image-search collection
-      Policy: >-
-        {"Rules":[{"ResourceType":"collection","Resource":["collection/image-search"]}],"AWSOwnedKey":true}
-  Collection:
-    Type: 'AWS::OpenSearchServerless::Collection'
-    DeletionPolicy: Delete
-    Properties:
-      Name: image-search-2
-      Type: VECTORSEARCH
-      Description: Collection to holds images and metadata about the images extracted from pdf documents
-    DependsOn: [EncryptionPolicy, DataAccessPolicy, NetworkPolicy]
-  SessionTable:
+  
+  DDBSessionTable:
     Type: 'AWS::DynamoDB::Table'
     Properties:
+      TableName: 'SessionTable'
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: pk
@@ -62,7 +39,8 @@ Resources:
           KeyType: HASH
         - AttributeName: sk
           KeyType: RANGE
-  AdminRole:
+  
+  IAMAdminRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -78,30 +56,135 @@ Resources:
               - sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AdministratorAccess
-  Cloud9Env:
-    Type: AWS::Cloud9::EnvironmentEC2
-    Properties:
-      AutomaticStopTimeMinutes: 150
-      Description: Enterprise Search Development Environment
-      ImageId: amazonlinux-2-x86_64
-      InstanceType: t3.large
-      Name: enterprise-search-env
-#      Repositories:
-#        - PathComponent: chatbot-workshop
-#          RepositoryUrl:
-#            Fn::GetAtt:
-#              - CodeCommitRepoDC6A41F9
-#              - CloneUrlHttp
     Metadata:
       aws:cdk:path: workshop/Cloud9
+  DataAccessPolicy:
+    Type: 'AWS::OpenSearchServerless::AccessPolicy'
+    Properties:
+      Name: image-search-access-policy
+      Type: data
+      Description: Access policy for AOSS collection
+      Policy: !Sub >-
+        [{"Description":"Access for cfn user","Rules":[{"ResourceType":"index","Resource":["index/*/*"],"Permission":["aoss:*"]},
+        {"ResourceType":"collection","Resource":["collection/image-search"],"Permission":["aoss:*"]}],
+        "Principal":["arn:aws:iam::${AWS::AccountId}:user/${IAMAdminRole}", "arn:aws:iam::${AWS::AccountId}:role/Admin"]}]
 
+  NetworkPolicy:
+    Type: 'AWS::OpenSearchServerless::SecurityPolicy'
+    Properties:
+      Name: image-search-network-policy
+      Type: network
+      Description: Network policy for image-search collection
+      Policy: >-
+        [{"Rules":[{"ResourceType":"collection","Resource":["collection/image-search"]}, {"ResourceType":"dashboard","Resource":["collection/image-search"]}],"AllowFromPublic":true}]
+
+  EncryptionPolicy:
+    Type: 'AWS::OpenSearchServerless::SecurityPolicy'
+    Properties:
+      Name: image-search-security-policy
+      Type: encryption
+      Description: Encryption policy for image-search collection
+      Policy: >-
+        {"Rules":[{"ResourceType":"collection","Resource":["collection/image-search"]}],"AWSOwnedKey":true}
+
+  ImageSearchVectorCollection:
+    Type: 'AWS::OpenSearchServerless::Collection'
+    Properties:
+      Name: image-search
+      Type: VECTORSEARCH
+      Description: Collection to holds images and metadata about the images extracted from pdf documents
+    DependsOn: [EncryptionPolicy, DataAccessPolicy, NetworkPolicy]
+
+  EC2KeyPair:
+    Type: 'AWS::EC2::KeyPair'
+    Properties:
+      KeyName: !Sub '${AWS::StackName}-EC2KeyPair'
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: t2.micro
+      KeyName: !Ref EC2KeyPair
+      SecurityGroups:
+        - !Ref InstanceSecurityGroup
+      IamInstanceProfile: !Ref InstanceProfile
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -x
+          yum update -y
+          yum -y groupinstall "Development Tools"
+          yum -y install git aws-cli openssl-devel bzip2-devel libffi-devel
+          wget https://www.python.org/ftp/python/3.9.16/Python-3.9.16.tgz
+          tar xzf Python-3.9.16.tgz
+          rm -rf Python-3.9.16.tgz
+          cd Python-3.9.16
+          ./configure --enable-optimizations
+          make altinstall
+          su ec2-user
+          s3_bucket_name=${S3BucketName}
+          admin_role="arn:aws:iam::${AWS::AccountId}:role/${IAMAdminRole}"
+          os_endpoint_url="https://${ImageSearchVectorCollection}.${AWS::Region}.aoss.amazonaws.com"
+          dynamo_chat_history=${DDBSessionTable}
+          echo $s3_bucket_name > /home/ec2-user/envconfig.txt
+          echo $admin_role >> /home/ec2-user/envconfig.txt
+          echo $os_endpoint_url >> /home/ec2-user/envconfig.txt
+          echo $dynamo_chat_history >> /home/ec2-user/envconfig.txt
+          export PATH=$PATH:/usr/local/bin/python3.9
+          echo $PATH
+          export STREAMLIT_SERVER_PORT=8501
+          export S3_BUCKET_NAME=$s3_bucket_name
+          export OPENSEARCH_ENDPOINT=$os_endpoint_url
+          export AWS_REGION=${AWS::Region}
+          export AWS_DEFAULT_REGION=${AWS::Region}
+          export DYNAMO_CHAT_HISTORY=$dynamo_chat_history
+          echo "export PATH=$PATH:/usr/local/bin/python3.9" >> /home/ec2-user/.bash_profile
+          echo "export STREAMLIT_SERVER_PORT=8501" >> /home/ec2-user/.bash_profile
+          echo "export S3_BUCKET_NAME=$s3_bucket_name" >> /home/ec2-user/.bash_profile
+          echo "export OPENSEARCH_ENDPOINT=$os_endpoint_url" >> /home/ec2-user/.bash_profile
+          echo "export AWS_REGION=${AWS::Region}" >> /home/ec2-user/.bash_profile
+          echo "export AWS_DEFAULT_REGION=${AWS::Region}" >> /home/ec2-user/.bash_profile
+          echo "export DYNAMO_CHAT_HISTORY=$dynamo_chat_history" >> /home/ec2-user/.bash_profile
+          cd /home/ec2-user/
+          python3.9 -m venv venv
+          source venv/bin/activate
+          echo "source ~/venv/bin/activate" >> /home/ec2-user/.bash_profile
+          git clone https://github.com/amoghgaikwad/cs-01.git
+          pip3.9 install -r cs-01/requirements.txt
+          cp cs-01/main.py /home/ec2-user/main.py
+          echo "#!/bin/bash" >> /home/ec2-user/setup_env.sh
+          echo "source ~/.bash_profile" >> /home/ec2-user/setup_env.sh
+          chmod 755 /home/ec2-user/setup_env.sh
+          chown -R ec2-user:ec2-user /home/ec2-user/
+  InstanceSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Allow HTTP traffic
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8501
+          ToPort: 8501
+          CidrIp: !Ref CidrIPRange
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref CidrIPRange
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref IAMAdminRole
 Outputs:
-  IAMUser:
-    Value: !Ref IAMuser
+  IAMole:
+    Value: !Ref IAMAdminRole
   DashboardURL:
-    Value: !GetAtt Collection.DashboardEndpoint
+    Value: !GetAtt ImageSearchVectorCollection.DashboardEndpoint
   CollectionARN:
-    Value: !GetAtt Collection.Arn
+    Value: !GetAtt ImageSearchVectorCollection.Arn
   SessionTableName:
     Description: DynamoDB Chat History Table
-    Value: !Ref SessionTable
+    Value: !Ref DDBSessionTable
+  S3BucketName:
+    Value: !Ref S3BucketName
