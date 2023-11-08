@@ -27,16 +27,14 @@ This code repo uses [streamlit](https://docs.streamlit.io/)
 The below instructions deploys the Streamlit app into an EC2 instance.
 
 1. Deploy the `cfn_template.yaml` into your account.
-2. Navigate to the EC2 instance created by the cfn template and run `streamlit run main.py`
-3. Please refer to the CFN Stack output to find the instance id 
-4. Lookup the instance id in the [EC2 console](https://console.aws.amazon.com/ec2)
-5. Click on the instance id, click **Connect** on the top menu and choose **Session Manager** to connect and open the EC2 terminal 
-6. [OPTIONAL] Login as root (`sudo su`)
-7. Then check the /var/log/cloud-init-output.log to see if the initialization scripts have successfully run (tail -100f /var/log/cloud-init-output.log)
-8. Login as ec2-user and navigate to `/home/ce2-user/` directory (`sudo -i -u ec2-user`) 
-9. Run `streamlit run main.py` to run the streamlit application
-
-10. The following prompt should appear upon execution of the previous command, please open the **External URL** in your browser to view the web application
+2. Navigate to the EC2 instance created by the cloudformation template. (Please refer to the CFN Stack **output** to find the EC2 instance id) 
+3. Lookup the instance id in the [EC2 console](https://console.aws.amazon.com/ec2)
+4. Click on the instance id, click **Connect** on the top menu and choose **Session Manager** to connect and open the EC2 terminal 
+5. [OPTIONAL] Login as root (`sudo su`)
+6. Then check the /var/log/cloud-init-output.log to see if the initialization scripts have successfully run (tail -100f /var/log/cloud-init-output.log)
+7. Login as ec2-user and navigate to `/home/ec2-user/` directory (`sudo -i -u ec2-user`) 
+8. Run `streamlit run main.py` to run the streamlit application
+9. The following prompt should appear upon execution of the previous command, please open the **External URL** in your browser to view the web application
 You can now view your Streamlit app in your browser.
 
 Network URL: http://xxx.xx.xx.xxx:8501
