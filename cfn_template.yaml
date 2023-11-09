@@ -5,13 +5,11 @@ Parameters:
   S3BucketName:
     Description: S3 bucket to upload the PDF files
     Type: String
-    Default: image-search-east-1
     AllowedPattern: "^(?=\\s*\\S).*$"
 
   CidrIPRange:
     Description: Please enter the Public CIDR of your local PC (e.g. 73.13.100.24/32)
     Type: String
-    Default: 15.248.1.220/32
     AllowedPattern: "^(?=\\s*\\S).*$"
 
   LatestAmiId:

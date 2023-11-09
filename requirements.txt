@@ -11,3 +11,4 @@ opensearch-py
 requests_aws4auth
 Pillow
 fitz
+PyMuPDF
